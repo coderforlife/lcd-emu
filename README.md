@@ -1,4 +1,4 @@
 lcd-emu
 =======
 
-Emulator for HD44780 LCD. Can be controlled through COM, TCP, or named pipes.
+Emulator for USB2LCD+ (Matrix Orbital compatible) LCD. Can be controlled through COM, TCP, or named pipes.
