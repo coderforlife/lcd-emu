@@ -47,7 +47,9 @@ namespace LCD.Emulator
         {
             this.chip = chip;
 
-            InitializeComponent();
+            this.InitializeComponent();
+            try { this.Icon = Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location); }
+            catch (Exception) { }
             this.background = ColorTranslator.FromHtml(settings["Background"].InnerText);
             this.foreground = ColorTranslator.FromHtml(settings["Foreground"].InnerText);
             this.fgBrush = new SolidBrush(this.foreground);
@@ -122,11 +124,6 @@ namespace LCD.Emulator
 
             this.SuspendLayout();
             this.ContextMenuStrip = menu;
-            try
-            {
-                this.Icon = Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location);
-            }
-            catch (Exception) { }
             this.FormBorderStyle = FormBorderStyle.None;
             this.ShowInTaskbar = false;
             this.DoubleBuffered = true;
