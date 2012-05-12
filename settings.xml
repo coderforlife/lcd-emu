@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<LCD>
+  <Display>
+    <CGROM>cgrom.png</CGROM>
+    <Background>#00FF00</Background>
+    <Foreground>#000000</Foreground>
+    <Size>40x4</Size>
+    <CharacterSize>5x8</CharacterSize>
+    <GapSize>1x1</GapSize>
+    <PixelSize>4x4</PixelSize><!---13x12-->
+    <BorderSize>4x4</BorderSize>
+  </Display>
+  <Chip>
+    <EEPROM>eeprom.dat</EEPROM>
+    <Link>COM:COM9</Link>
+  </Chip>
+</LCD>
