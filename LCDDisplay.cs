@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -18,11 +19,9 @@ namespace LCD.Emulator
         private readonly Color background, foreground;
         private readonly SolidBrush fgBrush;
         private readonly Pen borderTopPen, borderLeftPen;
-        private const int cgromRawCharHeight = 10;
-        private readonly byte[] cgrom_raw = new byte[256 * cgromRawCharHeight];
-        private readonly bool[] cgrom_dirty = new bool[256];
-        private readonly Bitmap[] cgrom = new Bitmap[256];
-        private readonly Size size, pixelSize, charSize, gapSize, borderSize, charFullSize, charPixelSize, tlOffset;
+        private readonly CGROM cgrom;
+        private readonly Size size, pixelSize, charSize, gapSize, borderSize, charFullSize, charFullPixelSize, tlOffset;
+        private readonly Rectangle character;
         private bool display = true, cursor = true;
         private int cursor_pos = 0;
         private readonly byte[] text = new byte[4 * LINE_LEN];
@@ -53,29 +52,23 @@ namespace LCD.Emulator
             this.background = ColorTranslator.FromHtml(settings["Background"].InnerText);
             this.foreground = ColorTranslator.FromHtml(settings["Foreground"].InnerText);
             this.fgBrush = new SolidBrush(this.foreground);
-            using (Bitmap b = new Bitmap(settings["CGROM"].InnerText))
-            {
-                BitmapData d = b.LockBits(new Rectangle(new Point(0, 0), b.Size), ImageLockMode.ReadOnly, PixelFormat.Format1bppIndexed);
-                int max = Math.Min(d.Height, this.cgrom_raw.Length);
-                for (int i = 0; i < max; ++i)
-                    this.cgrom_raw[i] = (byte)~Marshal.ReadByte(d.Scan0, i * d.Stride);
-                b.UnlockBits(d);
-            }
+            this.cgrom = new CGROM(settings["CGROM"].InnerText);
             this.size = ReadSize(settings["Size"].InnerText);
             this.charSize = ReadSize(settings["CharacterSize"].InnerText);
             this.gapSize = ReadSize(settings["GapSize"].InnerText);
             this.pixelSize = ReadSize(settings["PixelSize"].InnerText);
             this.borderSize = ReadSize(settings["BorderSize"].InnerText);
             this.charFullSize = new Size(this.charSize.Width + this.gapSize.Width, this.charSize.Height + this.gapSize.Height);
-            this.charPixelSize = new Size(this.charFullSize.Width * this.pixelSize.Width, this.charFullSize.Height * this.pixelSize.Height);
+            this.charFullPixelSize = new Size(this.charFullSize.Width * this.pixelSize.Width, this.charFullSize.Height * this.pixelSize.Height);
             this.tlOffset = new Size(this.gapSize.Width * this.pixelSize.Width + borderSize.Width, this.gapSize.Height * this.pixelSize.Height + borderSize.Height);
+            this.character = new Rectangle(0, 0, this.charSize.Width, this.charSize.Height);
 
             this.borderTopPen  = new Pen(this.fgBrush, this.borderSize.Height);
             this.borderLeftPen = new Pen(this.fgBrush, this.borderSize.Width );
 
             this.Size = new Size(
-                this.size.Width  * this.charPixelSize.Width  + this.tlOffset.Width  + borderSize.Width,
-                this.size.Height * this.charPixelSize.Height + this.tlOffset.Height + borderSize.Height
+                this.size.Width  * this.charFullPixelSize.Width  + this.tlOffset.Width  + borderSize.Width,
+                this.size.Height * this.charFullPixelSize.Height + this.tlOffset.Height + borderSize.Height
             );
             this.MaximumSize = this.Size;
             this.MinimumSize = this.Size;
@@ -84,7 +77,6 @@ namespace LCD.Emulator
             this.blinker.Interval = 400;
             this.blinker.Tick += this.BlinkIt;
 
-            this.DirtyCGROM();
             this.Clear();
             this.UpdateColors();
         }
@@ -161,51 +153,26 @@ namespace LCD.Emulator
         [DllImport("user32")] public static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
         protected override void OnMouseDown(MouseEventArgs e) { if (e.Button == MouseButtons.Left) { ReleaseCapture(); SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0); } base.OnMouseDown(e); }
 
-        private void DirtyCGROM()
+        private void DrawCharacter(Graphics g, int x, int y, byte c)
         {
-            for (int i = 0; i < this.cgrom.Length; ++i)
-                cgrom_dirty[i] = true;
-        }
-
-        private void DrawCharacter(Graphics G, int X, int Y, byte c)
-        {
-            if (this.cgrom[c] == null)
-                this.cgrom[c] = new Bitmap(this.charPixelSize.Width, this.charPixelSize.Height, PixelFormat.Format32bppArgb);
-            if (this.cgrom_dirty[c])
-            {
-                using (Graphics g = Graphics.FromImage(this.cgrom[c]))
-                {
-                    g.Clear(Color.Transparent);
-                    for (int y = 0; y < this.charSize.Height; ++y)
-                    {
-                        byte row = this.cgrom_raw[c * cgromRawCharHeight + y];
-                        for (int x = 0; x < this.charSize.Width && row != 0; ++x)
-                        {
-                            if ((row & 0x80) == 0x80)
-                                g.FillRectangle(this.fgBrush, x * this.pixelSize.Width, y * this.pixelSize.Width, this.pixelSize.Width, this.pixelSize.Height);
-                            row <<= 1;
-                        }
-                    }
-                }
-                this.cgrom_dirty[c] = false;
-            }
-            G.DrawImageUnscaled(this.cgrom[c], X * this.charPixelSize.Width, Y * this.charPixelSize.Height);
+            g.FillRegion(this.fgBrush, this.cgrom[c].TranslatedAndClipped(x * this.charFullSize.Width, y * this.charFullSize.Height, this.character));
         }
 
         private void DrawUnderline(Graphics g, int x, int y)
         {
-            g.FillRectangle(this.fgBrush, x * this.charPixelSize.Width, y * this.charPixelSize.Height + 8 * this.pixelSize.Height, this.charPixelSize.Width, this.pixelSize.Height);
+            g.FillRectangle(this.fgBrush, x * this.charFullSize.Width, y * this.charFullSize.Height + 8, this.charSize.Width, 1);
         }
 
         private void DrawBox(Graphics g, int x, int y)
         {
-            g.FillRectangle(this.fgBrush, x * this.charPixelSize.Width, y * this.charPixelSize.Height, this.charPixelSize.Width, this.charPixelSize.Height);
+            g.FillRectangle(this.fgBrush, x * this.charFullSize.Width, y * this.charFullSize.Height, this.charSize.Width, this.charSize.Height);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
             Graphics g = e.Graphics;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
             g.Clear(this.BackColor);
             float w = this.Size.Width, h = this.Size.Height, lh = this.borderSize.Height / 2f, lw = this.borderSize.Width / 2f;
             g.DrawLine(this.borderTopPen,  0, lh,     w, lh    ); // top
@@ -216,11 +183,10 @@ namespace LCD.Emulator
             {
                 bool blink_off = this.blinker.Enabled && !this.blink_on;
                 g.TranslateTransform(this.tlOffset.Width, this.tlOffset.Height);
+                g.ScaleTransform(this.pixelSize.Width, this.pixelSize.Height);
                 for (int i = 0; i < this.text.Length; ++i)
-                {
                     if (i != cursor_pos || !blink_off)
                         DrawCharacter(g, i % LINE_LEN, i / LINE_LEN, (byte)this.text[i]);
-                }
                 if (this.cursor && !blink_off) DrawUnderline(g, this.cursor_pos % LINE_LEN, this.cursor_pos / LINE_LEN);
                 //if (this.blinker.Enabled && this.blink_on) DrawBox(g, this.cursor_pos % LINE_LEN, this.cursor_pos / LINE_LEN); 
             }
@@ -232,9 +198,9 @@ namespace LCD.Emulator
                 this.Invoke(new Action(this.InvalidateCurCharacter));
             else
                 this.Invalidate(new Rectangle(
-                    (this.cursor_pos % LINE_LEN) * this.charPixelSize.Width  + this.tlOffset.Width,
-                    (this.cursor_pos / LINE_LEN) * this.charPixelSize.Height + this.tlOffset.Height,
-                    this.charPixelSize.Width, this.charPixelSize.Height));
+                    (this.cursor_pos % LINE_LEN) * this.charFullPixelSize.Width  + this.tlOffset.Width,
+                    (this.cursor_pos / LINE_LEN) * this.charFullPixelSize.Height + this.tlOffset.Height,
+                    this.charFullPixelSize.Width, this.charFullPixelSize.Height));
         }
         private void InvalidateAll()
         {
@@ -266,12 +232,11 @@ namespace LCD.Emulator
                 this.Invoke(new Action(this.UpdateColors));
             else
             {
-                Color origFG = this.ForeColor;
                 this.BackColor = this.ApplyBacklight(this.background);
                 this.ForeColor = this.ApplyBacklight(this.foreground);
                 if (this.contrast <= 127) { this.ForeColor = Mix(this.ForeColor, this.BackColor, (byte)((127 - this.contrast) * 2)); } // this.contrast == 0   => entirely this.BackColor
                 if (this.contrast >= 128) { this.BackColor = Mix(this.BackColor, this.ForeColor, (byte)((this.contrast - 128) * 2)); } // this.contrast == 255 => entirely this.ForeColor
-                if (this.ForeColor != origFG) { this.fgBrush.Color = this.ForeColor; this.DirtyCGROM(); }
+                this.fgBrush.Color = this.ForeColor;
                 this.Invalidate();
             }
         }
@@ -299,23 +264,8 @@ namespace LCD.Emulator
         public void CursorRight() { this.Goto(this.cursor_pos + 1); }
         public byte Contrast  { get { return this.contrast;  } set { this.contrast = value;  this.UpdateColors(); } }
         public byte Backlight { get { return this.backlight; } set { this.backlight = value; this.UpdateColors(); } }
-        public byte[] GetCustomChar(int i)
-        {
-            if (i < 0 || i >= 8) { throw new ArgumentOutOfRangeException(); }
-            byte[] b = new byte[8];
-            for (int j = 0; j < 8; ++j)
-                b[j] = (byte)(this.cgrom_raw[i * cgromRawCharHeight + j] >> 3);
-            return b;
-        }
-        public void SetCustomChar(int i, byte[] b)
-        {
-            if (i < 0 || i >= 8) { throw new ArgumentOutOfRangeException(); }
-            if (b.Length != 8) { throw new ArgumentException(); }
-            for (int j = 0; j < 8; ++j)
-                this.cgrom_raw[i * cgromRawCharHeight + j] = (byte)(b[j] << 3);
-            this.cgrom_dirty[i] = true;
-            this.InvalidateAll();
-        }
+        public byte[] GetCustomChar(int i) { return this.cgrom.GetCustomChar(i); }
+        public void SetCustomChar(int i, byte[] b) { this.cgrom.SetCustomChar(i, b); this.InvalidateAll(); }
         public byte[] CompleteContent { get { return (byte[])this.text.Clone(); } set { Array.Copy(value, this.text, value.Length); this.InvalidateAll(); } }
     }
 }
